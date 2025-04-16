@@ -1,5 +1,5 @@
-#include "msgq.h"
-
+#include "msgq_private.h"
+#include "shm_private.h"
 
 #include <stdbool.h>
 #include <stdint.h>

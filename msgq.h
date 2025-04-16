@@ -23,6 +23,3 @@ void* consumer_get_tail(consumer_t *consumer);
 void* consumer_get_head(consumer_t *consumer);
 
 
-index_t producer_get_current(producer_t *producer);
-index_t consumer_get_current(consumer_t *consumer);
-index_t producer_get_overrun(producer_t *producer);

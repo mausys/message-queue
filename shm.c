@@ -1,4 +1,4 @@
-#include "shm.h"
+#include "shm_private.h"
 
 #include <stddef.h>
 #include <stdalign.h>
@@ -19,6 +19,7 @@ uintptr_t msgq_shm_get_buffer(msgq_shm_t *shm)
 {
     return (uintptr_t)shm->mem + get_buffer_offset(shm->n);
 }
+
 
 size_t msgq_shm_calc_size(size_t n, size_t msg_size)
 {
