@@ -8,9 +8,6 @@
 #include <assert.h>
 
 
-
-
-
 typedef struct msgq {
     unsigned n;
     size_t msg_size;
@@ -19,6 +16,7 @@ typedef struct msgq {
     atomic_index_t *list;
     uintptr_t msgs_buffer;
 } msgq_t;
+
 
 typedef struct producer {
     msgq_t msgq;
