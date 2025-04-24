@@ -13,6 +13,9 @@ typedef struct msgq {
     size_t msg_size;
     atomic_index_t *tail;
     atomic_index_t *head;
+    /* circular list for ordering the messages,
+    * initialized simple as list[i] = (i + 1) % n,
+    * but due to overruns might get scrambled */
     atomic_index_t *list;
     uintptr_t msgs_buffer;
 } msgq_t;
@@ -38,6 +41,7 @@ static inline void* mem_offset(void *p, size_t offset)
     return (void*)((uintptr_t)p + offset);
 }
 
+
 static void* get_message(const msgq_t *msgq, index_t index)
 {
     if (index >= msgq->n) {
@@ -46,8 +50,6 @@ static void* get_message(const msgq_t *msgq, index_t index)
 
     return (void*)(msgq->msgs_buffer + (index * msgq->msg_size));
 }
-
-
 
 
 static index_t get_next(msgq_t *msgq, index_t current)
@@ -81,6 +83,7 @@ static index_t append_msg(producer_t *producer)
     return next;
 }
 
+
 static bool producer_move_tail(producer_t *producer, index_t tail)
 {
     msgq_t *msgq = &producer->msgq;
@@ -91,8 +94,7 @@ static bool producer_move_tail(producer_t *producer, index_t tail)
 }
 
 
-
-/* try to jump over tail blocked by consumer,  */
+/* try to jump over tail blocked by consumer */
 static void producer_overrun(producer_t *producer, index_t tail)
 {
     msgq_t *msgq = &producer->msgq;
@@ -111,6 +113,9 @@ static void producer_overrun(producer_t *producer, index_t tail)
     }
 }
 
+/* inserts the current message into the queue and
+ * if the queue is full, discard the last message that is not
+ * used by consumer. Returns pointer to new message */
 void* producer_force_put(producer_t *producer)
 {
     msgq_t *msgq = &producer->msgq;
