@@ -141,20 +141,20 @@ void* producer_force_put(producer_t *producer)
         * soon as the consumer releases it */
         if (consumed) {
             /* consumer released overrun message, so we can use it */
-            /* relist overrun */
+            /* requeue overrun */
             atomic_store(&msgq->list[producer->overrun], next);
 
             producer->current = producer->overrun;
             producer->overrun = INDEX_END;
 
         } else {
-            /* consumer still blocks overrun message, move the tail again,
+            /* consumer still blocks overran message, move the tail again,
              * because the message queue is still full */
             if (producer_move_tail(producer, tail)) {
                 producer->current = tail & INDEX_MASK;
             } else {
                 /* consumer just released overrun message, so we can use it */
-                /* relist overrun */
+                /* requeue overrun */
                 atomic_store(&msgq->list[producer->overrun], next);
 
                 producer->current = producer->overrun;
@@ -168,7 +168,7 @@ void* producer_force_put(producer_t *producer)
             producer->current = next;
         } else {
             if (!consumed) {
-                /* message queue is full, but no message has consumed yet, so try to move tail */
+                /* message queue is full, but no message is consumed yet, so try to move tail */
                 if (producer_move_tail(producer, tail)) {
                     producer->current = tail & INDEX_MASK;
                 } else {
@@ -206,9 +206,9 @@ void* consumer_get_head(consumer_t *consumer)
         tail |= CONSUMED_FLAG;
 
         if (atomic_compare_exchange_weak(msgq->tail, &tail, head | CONSUMED_FLAG)) {
-            /* only accept head, if producer didn't move tail,
+            /* only accept head if producer didn't move tail,
             *  otherwise the producer could fill the whole queue and the head could be the
-            *  producer current message  */
+            *  producers current message  */
             consumer->current = head;
             break;
         }
