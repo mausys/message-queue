@@ -11,13 +11,18 @@
 typedef struct msgq {
     unsigned n;
     size_t msg_size;
-    atomic_index_t *tail;
-    atomic_index_t *head;
-    /* circular list for ordering the messages,
-    * initialized simple as list[i] = (i + 1) % n,
-    * but due to overruns might get scrambled */
-    atomic_index_t *list;
     uintptr_t msgs_buffer;
+    /* producer and consumer can change the tail
+    *  the MSB shows who has last modified the tail */
+    atomic_index_t *tail;
+    /* head is only written by producer and only used
+    * in consumer_get_head */
+    atomic_index_t *head;
+    /* circular queue for ordering the messages,
+    * initialized simple as queue[i] = (i + 1) % n,
+    * but due to overruns might get scrambled.
+    * only producer can modify the queue */
+    atomic_index_t *queue;
 } msgq_t;
 
 
@@ -35,13 +40,6 @@ typedef struct consumer {
 } consumer_t;
 
 
-
-static inline void* mem_offset(void *p, size_t offset)
-{
-    return (void*)((uintptr_t)p + offset);
-}
-
-
 static void* get_message(const msgq_t *msgq, index_t index)
 {
     if (index >= msgq->n) {
@@ -54,7 +52,7 @@ static void* get_message(const msgq_t *msgq, index_t index)
 
 static index_t get_next(msgq_t *msgq, index_t current)
 {
-    return atomic_load(&msgq->list[current]);
+    return atomic_load(&msgq->queue[current]);
 }
 
 /* set the current message as head */
@@ -65,14 +63,14 @@ static index_t append_msg(producer_t *producer)
     index_t next = get_next(msgq, producer->current);
 
     /* current message is the new end of chain*/
-    atomic_store(&msgq->list[producer->current], INDEX_END);
+    atomic_store(&msgq->queue[producer->current], INDEX_END);
 
     if (producer->head == INDEX_END) {
         /* first message */
         atomic_store(msgq->tail, producer->current);
     } else {
         /* append current message to the chain */
-        atomic_store(&msgq->list[producer->head], producer->current);
+        atomic_store(&msgq->queue[producer->head], producer->current);
     }
 
     producer->head = producer->current;
@@ -87,7 +85,6 @@ static index_t append_msg(producer_t *producer)
 static bool producer_move_tail(producer_t *producer, index_t tail)
 {
     msgq_t *msgq = &producer->msgq;
-    bool tail_consumed = !!(tail & ORIGIN_MASK);
     index_t next = get_next(msgq, tail & INDEX_MASK);
 
     return atomic_compare_exchange_weak(producer->msgq.tail, &tail, next);
@@ -142,7 +139,7 @@ void* producer_force_put(producer_t *producer)
         if (consumed) {
             /* consumer released overrun message, so we can use it */
             /* requeue overrun */
-            atomic_store(&msgq->list[producer->overrun], next);
+            atomic_store(&msgq->queue[producer->overrun], next);
 
             producer->current = producer->overrun;
             producer->overrun = INDEX_END;
@@ -155,7 +152,7 @@ void* producer_force_put(producer_t *producer)
             } else {
                 /* consumer just released overrun message, so we can use it */
                 /* requeue overrun */
-                atomic_store(&msgq->list[producer->overrun], next);
+                atomic_store(&msgq->queue[producer->overrun], next);
 
                 producer->current = producer->overrun;
                 producer->overrun = INDEX_END;
@@ -258,7 +255,7 @@ static void msgq_init(msgq_t *msgq, msgq_shm_t *shm)
         .msg_size = shm->msg_size,
         .tail = msgq_shm_get_tail(shm),
         .head = msgq_shm_get_head(shm),
-        .list = msgq_shm_get_list(shm),
+        .queue = msgq_shm_get_list(shm),
         .msgs_buffer = msgq_shm_get_buffer(shm),
     };
 }

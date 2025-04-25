@@ -30,4 +30,5 @@ add_executable(check_msgq test/test.c ${FIBER_SRCS}
  ${MSGQ_SRCS})
 
 target_link_libraries(check_msgq Check::checkShared )
+target_compile_options(check_msgq PRIVATE  -Wall -Wextra  -Wsign-compare)
 target_include_directories(check_msgq PRIVATE ${MSGQ_DIR} ${FIBER_DIR} ${CHECK_INCLUDE_DIRS})
