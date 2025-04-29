@@ -90,21 +90,21 @@ inline int producer_move_tail(producer_t *producer, unsigned tail)
 {
 	msgq_t *msgq;
 	unsigned next;
-	int ret;
+	int b;
 
 	msgq = producer->msgq;
 	next = msgq->queue[tail & INDEX_MASK];
 
-	ret = atomic_compare_exchange_weak(&msgq->tail, &tail, next);
+	b = atomic_compare_exchange_weak(&msgq->tail, &tail, next);
 	
-	return ret;
+	return b;
 }
 
 
 /* try to jump over tail blocked by consumer */
 inline void producer_overrun(producer_t *producer, unsigned tail)
 {
-	int r;
+	int b;
 	msgq_t *msgq;
 	unsigned new_current, new_tail, expected;
 
@@ -115,8 +115,8 @@ inline void producer_overrun(producer_t *producer, unsigned tail)
 	/* if atomic_compare_exchange_weak fails expected will be overwritten */
 	expected = tail;
 	
-	r = atomic_compare_exchange_weak(&producer->msgq->tail, &expected, new_tail);
-	if (r) {
+	b = atomic_compare_exchange_weak(&producer->msgq->tail, &expected, new_tail);
+	if (b) {
 		producer->current = new_current;
 		producer->overrun = tail & INDEX_MASK;
 	} else {
@@ -163,7 +163,9 @@ inline void producer_force_put(producer_t *producer)
 		} else {
 			/* consumer still blocks overran message, move the tail again,
 			* because the message queue is still full */
-			if (producer_move_tail(producer, tail)) {
+			int b;
+			b = producer_move_tail(producer, tail);
+			if (b) {
 				producer->current = tail & INDEX_MASK;
 			} else {
 				/* consumer just released overrun message, so we can use it */
@@ -182,7 +184,9 @@ inline void producer_force_put(producer_t *producer)
 		} else {
 			if (!consumed) {
 				/* message queue is full, but no message is consumed yet, so try to move tail */
-				if (producer_move_tail(producer, tail)) {
+				int b;
+				b = producer_move_tail(producer, tail);
+				if (b) {
 					producer->current = tail & INDEX_MASK;
 				} else {
 					/* consumer just started and consumed tail
