@@ -87,7 +87,7 @@ static bool producer_move_tail(producer_t *producer, index_t tail)
     msgq_t *msgq = &producer->msgq;
     index_t next = get_next(msgq, tail & INDEX_MASK);
 
-    return atomic_compare_exchange_weak(producer->msgq.tail, &tail, next);
+    return atomic_compare_exchange_weak(msgq->tail, &tail, next);
 }
 
 
@@ -101,7 +101,7 @@ static void producer_overrun(producer_t *producer, index_t tail)
     /* if atomic_compare_exchange_weak fails expected will be overwritten */
     index_t expected = tail;
 
-    if (atomic_compare_exchange_weak(producer->msgq.tail, &expected, new_tail)) {
+    if (atomic_compare_exchange_weak(msgq->tail, &expected, new_tail)) {
         producer->current = new_current;
         producer->overrun = tail & INDEX_MASK;
     } else {
