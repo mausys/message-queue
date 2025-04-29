@@ -1,0 +1,21 @@
+%X -xe2
+%C
+int atomic_compare_exchange_weak(unsigned *object, unsigned *expected, unsigned desired)
+{
+    if (*object == *expected) {
+        *object = desired;
+        return 1;
+    } else {
+        *expected = *object;
+        return 0;
+    }
+}
+
+unsigned atomic_fetch_or(unsigned *object, unsigned arg) 
+{
+        unsigned old = *object;
+        *object |= arg;
+        return old;
+}
+
+%%
