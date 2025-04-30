@@ -1,4 +1,3 @@
-%X -xe2
 %C
 int atomic_compare_exchange_weak(unsigned *object, unsigned *expected, unsigned desired)
 {

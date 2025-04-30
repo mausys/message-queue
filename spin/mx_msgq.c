@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <assert.h>
 
+#ifndef MODEX
+#include <stdatomic.h>
+#endif
 
 //  verify -p -E 7_q_update.c # using embedded printfs
 // or:
@@ -22,19 +25,22 @@
 
 #define INDEX_MASK (~ORIGIN_MASK)
 
-
-
-typedef struct msgq msgq_t;
-
-struct msgq {
+typedef struct msgq_shm {
 	unsigned tail;
 	unsigned head;
 	unsigned queue[NUM_MSGS];
-};
+}msgq_shm_t;
+
+
+typedef struct msgq {
+	unsigned *tail;
+	unsigned *head;
+	unsigned *queue;
+} msgq_t;
 
 
 typedef struct producer {
-	msgq_t *msgq;
+	msgq_t msgq;
 	unsigned head; /* last message in chain that can be used by consumer, chain[head] is always INDEX_END */
 	unsigned current; /* message used by producer, will become head  */
 	unsigned overrun; /* message used by consumer when tail moved away by producer, will become current when released by consumer */
@@ -42,16 +48,15 @@ typedef struct producer {
 
 
 typedef struct consumer {
-	msgq_t *msgq;
+	msgq_t msgq;
 	unsigned current;
 } consumer_t;
 
 
-producer_t g_producer;
+unsigned g_producer_current;
+unsigned g_consumer_current;
 
-consumer_t g_consumer;
-
-msgq_t g_msgq;
+msgq_shm_t g_msgq_shm;
 
 
 
@@ -59,18 +64,18 @@ msgq_t g_msgq;
 inline unsigned append_msg(producer_t *producer)
 {
 	msgq_t *msgq;
-	msgq = producer->msgq;
 	unsigned next;
 	
+	msgq = &producer->msgq;
+	
 	next = msgq->queue[producer->current];
-	msgq = producer->msgq;
 
 	/* current message is the new end of chain*/
 	msgq->queue[producer->current] = INDEX_END;
 
 	if (producer->head == INDEX_END) {
 		/* first message */
-		msgq->tail = producer->current;
+		*msgq->tail = producer->current;
 	} else {
 		/* append current message to the chain */
 		msgq->queue[producer->head] = producer->current;
@@ -79,7 +84,7 @@ inline unsigned append_msg(producer_t *producer)
 	producer->head = producer->current;
 
 	/* announce the new head for consumer_get_head */
-	msgq->head = producer->head;
+	*msgq->head = producer->head;
 
 	return next;
 }
@@ -92,10 +97,10 @@ inline int producer_move_tail(producer_t *producer, unsigned tail)
 	unsigned next;
 	int b;
 
-	msgq = producer->msgq;
+	msgq = &producer->msgq;
 	next = msgq->queue[tail & INDEX_MASK];
 
-	b = atomic_compare_exchange_weak(&msgq->tail, &tail, next);
+	b = atomic_compare_exchange_weak(msgq->tail, &tail, next);
 	
 	return b;
 }
@@ -108,14 +113,14 @@ inline void producer_overrun(producer_t *producer, unsigned tail)
 	msgq_t *msgq;
 	unsigned new_current, new_tail, expected;
 
-	msgq = producer->msgq;
+	msgq = &producer->msgq;
 	new_current = msgq->queue[tail & INDEX_MASK]; /* next */
 	new_tail  = msgq->queue[new_current]; /* after next */
 		
 	/* if atomic_compare_exchange_weak fails expected will be overwritten */
 	expected = tail;
 	
-	b = atomic_compare_exchange_weak(&producer->msgq->tail, &expected, new_tail);
+	b = atomic_compare_exchange_weak(msgq->tail, &expected, new_tail);
 	if (b) {
 		producer->current = new_current;
 		producer->overrun = tail & INDEX_MASK;
@@ -132,7 +137,7 @@ inline void producer_overrun(producer_t *producer, unsigned tail)
 inline void producer_force_put(producer_t *producer)
 {
 	msgq_t *msgq;
-	msgq = producer->msgq;
+	msgq = &producer->msgq;
 	unsigned next, tail; 
 	int consumed, full;
 
@@ -143,7 +148,7 @@ inline void producer_force_put(producer_t *producer)
 
 	next = append_msg(producer);
 
-	tail = msgq->tail;
+	tail = *msgq->tail;
 
 	consumed = !!(tail & CONSUMED_FLAG);
 
@@ -208,12 +213,13 @@ inline void consumer_get_tail(consumer_t *consumer)
 	msgq_t *msgq;
 	unsigned tail;
 
-	msgq = consumer->msgq;
+	msgq = &consumer->msgq;
 
-	tail = atomic_fetch_or(&msgq->tail, CONSUMED_FLAG);
+	tail = atomic_fetch_or(msgq->tail, CONSUMED_FLAG);
 
-	if (tail == INDEX_END)
+	if (tail == INDEX_END) {
 		return;
+	}
 
 	if (tail == (consumer->current | CONSUMED_FLAG)) {
 		unsigned next;
@@ -222,12 +228,12 @@ inline void consumer_get_tail(consumer_t *consumer)
 
 		if (next != INDEX_END) {
 			int r;
-			r = atomic_compare_exchange_weak(&msgq->tail, &tail, next | CONSUMED_FLAG);
+			r = atomic_compare_exchange_weak(msgq->tail, &tail, next | CONSUMED_FLAG);
 			if (r) {
 				consumer->current = next;
 			} else {
 				/* producer just moved tail, use it */
-				consumer->current = atomic_fetch_or(&msgq->tail, CONSUMED_FLAG);
+				consumer->current = atomic_fetch_or(msgq->tail, CONSUMED_FLAG);
 			}
 		}
 	} else {
@@ -238,20 +244,47 @@ inline void consumer_get_tail(consumer_t *consumer)
 
 void *producer(void *arg)
 {	
+	producer_t producer;
+	msgq_t *msgq;
+	
+	msgq = &producer.msgq;
+	
+	producer.current = INDEX_END;
+	producer.head = INDEX_END;
+	producer.overrun = INDEX_END;
+	
+	msgq->head = &g_msgq_shm.head;
+	msgq->tail = &g_msgq_shm.tail;
+	msgq->queue = g_msgq_shm.queue;
+	
+	
 	int i;
 	for (i = 0; i < 10; i++) {
-		producer_force_put(&g_producer);
-		assert(g_producer.current != g_consumer.current);
+		producer_force_put(&producer);
+		g_producer_current = producer.current;
+		assert(g_producer_current != g_consumer_current);
 	}
 	
 	return NULL;
 }
 
 void* consumer(void *arg)
-{
+{	
+	consumer_t consumer;
+	msgq_t *msgq;
+	
+	msgq = &consumer.msgq;
+	
+	msgq->head = &g_msgq_shm.head;
+	msgq->tail = &g_msgq_shm.tail;
+	msgq->queue = g_msgq_shm.queue;
+	
+	consumer.current = INDEX_END;
+	
 	for (;;) {
-		consumer_get_tail(&g_consumer);
-		assert((g_producer.current != g_consumer.current) || (g_consumer.current == INDEX_END));
+		consumer_get_tail(&consumer);
+		g_consumer_current = consumer.current;
+		assert((g_producer_current != g_consumer_current) || (g_consumer_current == INDEX_END));
 	}
 }
 
@@ -261,26 +294,22 @@ main(void)
 	int i;
 	pthread_t  a, b;
 	
-	g_msgq.tail = INDEX_END;
-	g_msgq.head = INDEX_END;
+	g_msgq_shm.tail = INDEX_END;
+	g_msgq_shm.head = INDEX_END;
 	
-	for (i = 0; i < NUM_MSGS - 1; i++)
-		g_msgq.queue[i] = i + 1;
+	for (i = 0; i < NUM_MSGS - 1; i++) {
+		g_msgq_shm.queue[i] = i + 1;
+	}
 	
-	g_msgq.queue[NUM_MSGS - 1] = 0; /* wrap around */
+	g_msgq_shm.queue[NUM_MSGS - 1] = 0; /* wrap around */
 	
-	g_producer.msgq = &g_msgq;
-	g_producer.current = INDEX_END;
-	g_producer.head = INDEX_END;
-	g_producer.overrun = INDEX_END;
-	
-	g_consumer.msgq = &g_msgq;
-	g_consumer.current = INDEX_END;
-	
-	
+
 
 	pthread_create(&a, 0, producer, 0);
 	pthread_create(&b, 0, consumer, 0);
+
+	pthread_join(a, 0);
+        pthread_join(b, 0);
 
 
 	return 0;
