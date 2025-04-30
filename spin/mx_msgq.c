@@ -25,12 +25,6 @@
 
 #define INDEX_MASK (~ORIGIN_MASK)
 
-typedef struct msgq_shm {
-	unsigned tail;
-	unsigned head;
-	unsigned queue[NUM_MSGS];
-}msgq_shm_t;
-
 
 typedef struct msgq {
 	unsigned *tail;
@@ -56,7 +50,12 @@ typedef struct consumer {
 unsigned g_producer_current;
 unsigned g_consumer_current;
 
-msgq_shm_t g_msgq_shm;
+
+
+unsigned g_msgq_shm_tail = INDEX_END;
+unsigned g_msgq_shm_head = INDEX_END;
+unsigned g_msgq_shm_queue[NUM_MSGS];
+
 
 
 
@@ -242,24 +241,30 @@ inline void consumer_get_tail(consumer_t *consumer)
 	}
 }
 
-void *producer(void *arg)
+void *producer_thread(void *arg)
 {	
 	producer_t producer;
 	msgq_t *msgq;
+	int i;
 	
 	msgq = &producer.msgq;
+	
+	for (i = 0; i < NUM_MSGS - 1; i++) {
+		g_msgq_shm_queue[i] = i + 1;
+	}
+	
+	g_msgq_shm_queue[NUM_MSGS - 1] = 0;
 	
 	producer.current = INDEX_END;
 	producer.head = INDEX_END;
 	producer.overrun = INDEX_END;
 	
-	msgq->head = &g_msgq_shm.head;
-	msgq->tail = &g_msgq_shm.tail;
-	msgq->queue = g_msgq_shm.queue;
+	msgq->head = &g_msgq_shm_head;
+	msgq->tail = &g_msgq_shm_tail;
+	msgq->queue = g_msgq_shm_queue;
 	
-	
-	int i;
-	for (i = 0; i < 10; i++) {
+
+	for (;;) {
 		producer_force_put(&producer);
 		g_producer_current = producer.current;
 		assert(g_producer_current != g_consumer_current);
@@ -268,16 +273,16 @@ void *producer(void *arg)
 	return NULL;
 }
 
-void* consumer(void *arg)
+void* consumer_thread(void *arg)
 {	
 	consumer_t consumer;
 	msgq_t *msgq;
 	
 	msgq = &consumer.msgq;
 	
-	msgq->head = &g_msgq_shm.head;
-	msgq->tail = &g_msgq_shm.tail;
-	msgq->queue = g_msgq_shm.queue;
+	msgq->head = &g_msgq_shm_head;
+	msgq->tail = &g_msgq_shm_tail;
+	msgq->queue = g_msgq_shm_queue;
 	
 	consumer.current = INDEX_END;
 	
@@ -294,19 +299,9 @@ main(void)
 	int i;
 	pthread_t  a, b;
 	
-	g_msgq_shm.tail = INDEX_END;
-	g_msgq_shm.head = INDEX_END;
 	
-	for (i = 0; i < NUM_MSGS - 1; i++) {
-		g_msgq_shm.queue[i] = i + 1;
-	}
-	
-	g_msgq_shm.queue[NUM_MSGS - 1] = 0; /* wrap around */
-	
-
-
-	pthread_create(&a, 0, producer, 0);
-	pthread_create(&b, 0, consumer, 0);
+	pthread_create(&a, 0, producer_thread, 0);
+	pthread_create(&b, 0, consumer_thread, 0);
 
 	pthread_join(a, 0);
         pthread_join(b, 0);
