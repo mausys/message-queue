@@ -223,7 +223,7 @@ void* consumer_get_tail(consumer_t *consumer)
     if (tail == INDEX_END)
         return NULL;
 
-    if (tail == (consumer->current | CONSUMED_FLAG)) {
+    if (tail & CONSUMED_FLAG) {
         /* try to get next message */
         index_t next = get_next(msgq, consumer->current);
 
