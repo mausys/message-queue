@@ -17,13 +17,13 @@
 #define NUM_MSGS 5
 
 
-#define INDEX_END (~(unsigned)0)
-
-#define CONSUMED_FLAG ((unsigned)1 << (31))
+#define INDEX_END     0xffffffff
+#define CONSUMED_FLAG 0x80000000
+#define INDEX_MASK    0x7fffffff
 
 #define ORIGIN_MASK CONSUMED_FLAG
 
-#define INDEX_MASK (~ORIGIN_MASK)
+
 
 
 typedef struct msgq {
@@ -60,7 +60,7 @@ unsigned g_msgq_shm_queue[NUM_MSGS];
 
 
 /* set the current message as head */
-inline unsigned append_msg(producer_t *producer)
+unsigned append_msg(producer_t *producer)
 {
 	msgq_t *msgq;
 	unsigned next;
@@ -90,7 +90,7 @@ inline unsigned append_msg(producer_t *producer)
 
 
 
-inline int producer_move_tail(producer_t *producer, unsigned tail)
+int producer_move_tail(producer_t *producer, unsigned tail)
 {
 	msgq_t *msgq;
 	unsigned next;
@@ -106,7 +106,7 @@ inline int producer_move_tail(producer_t *producer, unsigned tail)
 
 
 /* try to jump over tail blocked by consumer */
-inline void producer_overrun(producer_t *producer, unsigned tail)
+void producer_overrun(producer_t *producer, unsigned tail)
 {
 	int b;
 	msgq_t *msgq;
@@ -133,7 +133,7 @@ inline void producer_overrun(producer_t *producer, unsigned tail)
 /* inserts the current message into the queue and
  * if the queue is full, discard the last message that is not
  * used by consumer. Returns pointer to new message */
-inline void producer_force_put(producer_t *producer)
+unsigned producer_force_put(producer_t *producer)
 {
 	msgq_t *msgq;
 	msgq = &producer->msgq;
@@ -142,7 +142,7 @@ inline void producer_force_put(producer_t *producer)
 
 	if (producer->current == INDEX_END) {
 		producer->current = 0;
-		return;
+		return producer->current;
 	}
 
 	next = append_msg(producer);
@@ -203,11 +203,12 @@ inline void producer_force_put(producer_t *producer)
 			}
 		}
 	}
+	return producer->current;
 }
 
 
 
-inline void consumer_get_tail(consumer_t *consumer)
+unsigned consumer_get_tail(consumer_t *consumer)
 {
 	msgq_t *msgq;
 	unsigned tail;
@@ -217,10 +218,10 @@ inline void consumer_get_tail(consumer_t *consumer)
 	tail = atomic_fetch_or(msgq->tail, CONSUMED_FLAG);
 
 	if (tail == INDEX_END) {
-		return;
+		return INDEX_END;
 	}
 
-	if (tail == (consumer->current | CONSUMED_FLAG)) {
+	if (tail & CONSUMED_FLAG) {
 		unsigned next;
 		/* try to get next message */
 		next = msgq->queue[consumer->current];
@@ -239,6 +240,8 @@ inline void consumer_get_tail(consumer_t *consumer)
 		/* producer moved tail, use it*/
 		consumer->current = tail;
 	}
+	
+	return consumer->current;
 }
 
 void *producer_thread(void *arg)
@@ -248,6 +251,9 @@ void *producer_thread(void *arg)
 	int i;
 	
 	msgq = &producer.msgq;
+	
+	g_msgq_shm_tail = INDEX_END;
+	g_msgq_shm_head = INDEX_END;
 	
 	for (i = 0; i < NUM_MSGS - 1; i++) {
 		g_msgq_shm_queue[i] = i + 1;
@@ -265,6 +271,7 @@ void *producer_thread(void *arg)
 	
 
 	for (;;) {
+		g_producer_current = INDEX_END;
 		producer_force_put(&producer);
 		g_producer_current = producer.current;
 		assert(g_producer_current != g_consumer_current);
@@ -287,6 +294,7 @@ void* consumer_thread(void *arg)
 	consumer.current = INDEX_END;
 	
 	for (;;) {
+		g_consumer_current = INDEX_END;
 		consumer_get_tail(&consumer);
 		g_consumer_current = consumer.current;
 		assert((g_producer_current != g_consumer_current) || (g_consumer_current == INDEX_END));
