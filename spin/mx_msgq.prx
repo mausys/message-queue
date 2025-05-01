@@ -3,19 +3,15 @@
 %X -p producer_thread 
 %X -e producer_force_put
 %X -e producer_overrun 
-%X -e append_msg 
+%X -e append_msg
 %X -e producer_move_tail
 
 %P
 init {
-        c_code { 
-                now.g_producer_current = 0xffffffff;
-                now.g_consumer_current = 0xffffffff;
-        };
-        atomic {
-                run p_producer_thread();
-                run p_consumer_thread()
-        }
+    atomic {
+        run p_producer_thread();
+        run p_consumer_thread()
+    }
 }
 
 %C
@@ -32,9 +28,10 @@ int atomic_compare_exchange_weak(unsigned *object, unsigned *expected, unsigned 
 
 unsigned atomic_fetch_or(unsigned *object, unsigned arg) 
 {
-        unsigned old = *object;
-        *object |= arg;
-        return old;
+    unsigned old = *object;
+    *object |= arg;
+    return old;
 }
+
 
 %%

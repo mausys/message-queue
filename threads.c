@@ -10,7 +10,7 @@
 #define NUM_MESSAGES 5
 
 typedef struct msg {
-    volatile uint64_t counter;
+    volatile int64_t counter;
 } msg_t;
 
 atomic_uintptr_t g_msg_producer;
@@ -35,22 +35,21 @@ unsigned g_consumer_cnt;
 
 int producer_run(void *arg)
 {
-    uint64_t counter = 0;
+    int64_t counter = 0;
 
     for (g_producer_cnt = 0; g_producer_cnt < MAX_CYCLES; g_producer_cnt++) {
         /* during get/put message, pointer may be the same */
         atomic_store(&g_msg_producer, 0);
         msg_t *msg = producer_force_put(g_producer);
         atomic_store(&g_msg_producer, (uintptr_t)msg);
-
         for (int i = 0; i < PRODUCER_BUSY_CYCLES; i++) {
-            msg->counter = counter;
+            msg->counter = -1;
             uintptr_t msg_consumer = atomic_load(&g_msg_consumer);
             if (msg_consumer == g_msg_producer) {
                 LOG_ERR("producer_run error=%u", g_producer_cnt);
             }
         }
-        counter++;
+        msg->counter = counter++;
     }
 
     return 0;

@@ -143,7 +143,6 @@ void* producer_force_put(producer_t *producer)
 
             producer->current = producer->overrun;
             producer->overrun = INDEX_END;
-
         } else {
             /* consumer still blocks overran message, move the tail again,
              * because the message queue is still full */

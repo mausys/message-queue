@@ -64,9 +64,9 @@ unsigned append_msg(producer_t *producer)
 {
 	msgq_t *msgq;
 	unsigned next;
-	
+
 	msgq = &producer->msgq;
-	
+
 	next = msgq->queue[producer->current];
 
 	/* current message is the new end of chain*/
@@ -251,9 +251,6 @@ void *producer_thread(void *arg)
 	int i;
 	
 	msgq = &producer.msgq;
-	
-	g_msgq_shm_tail = INDEX_END;
-	g_msgq_shm_head = INDEX_END;
 	
 	for (i = 0; i < NUM_MSGS - 1; i++) {
 		g_msgq_shm_queue[i] = i + 1;
