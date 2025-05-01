@@ -24,10 +24,9 @@ set(FIBER_SRCS
   ${FIBER_DIR}/fiber.h
   ${FIBER_DIR}/fiber.c)
 
+add_executable(threads_msgq threads.c ${MSGQ_SRCS})
 
-
-add_executable(check_msgq test/test.c ${FIBER_SRCS}
- ${MSGQ_SRCS})
+add_executable(check_msgq test/test.c ${FIBER_SRCS} ${MSGQ_SRCS})
 
 target_link_libraries(check_msgq Check::checkShared )
 target_compile_options(check_msgq PRIVATE  -Wall -Wextra  -Wsign-compare)

@@ -276,7 +276,6 @@ static void consumer_run(void *user_data)
         if (pd->msg == cd->msg)
             pd->counter++;
 
-
         if (cd->msg->counter < counter) {
             consumer_error();
         }
