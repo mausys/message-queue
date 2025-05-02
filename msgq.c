@@ -92,7 +92,7 @@ static bool producer_move_tail(producer_t *producer, index_t tail)
 
 
 /* try to jump over tail blocked by consumer */
-static void producer_overrun(producer_t *producer, index_t tail)
+static bool producer_overrun(producer_t *producer, index_t tail)
 {
     msgq_t *msgq = &producer->msgq;
     index_t new_current = get_next(msgq, tail & INDEX_MASK); /* next */
@@ -102,11 +102,15 @@ static void producer_overrun(producer_t *producer, index_t tail)
     index_t expected = tail;
 
     if (atomic_compare_exchange_weak(msgq->tail, &expected, new_tail)) {
-        producer->current = new_current;
         producer->overrun = tail & INDEX_MASK;
+        producer->current = new_current;
+
+        return true;
     } else {
         /* consumer just released tail, so use it */
         producer->current = tail & INDEX_MASK;
+
+        return false;
     }
 }
 
@@ -166,10 +170,13 @@ void* producer_force_put(producer_t *producer)
             if (!consumed) {
                 /* message queue is full, but no message is consumed yet, so try to move tail */
                 if (producer_move_tail(producer, tail)) {
-                    producer->current = tail & INDEX_MASK;
+                    /* message queue is full -> tail & INDEX_MASK == next */
+                    producer->current = next;
                 } else {
-                   /* consumer just started and consumed tail
-                      if consumer already moved on, we will use tail  */
+                   /*  consumer just started and consumed tail
+                    *  we're assuming that consumer flagged tail (tail | CONSUMED_FLAG),
+                    *  if this this is not the case, consumer already moved on 
+                    *  and we will use tail  */
                     producer_overrun(producer, tail | CONSUMED_FLAG);
                 }
             } else {
