@@ -47,8 +47,8 @@ typedef struct consumer {
 } consumer_t;
 
 
-unsigned g_producer_current;
-unsigned g_consumer_current;
+unsigned g_producer_current = INDEX_END;
+unsigned g_consumer_current = INDEX_END;
 
 
 
@@ -267,10 +267,9 @@ void *producer_thread(void *arg)
 	msgq->queue = g_msgq_shm_queue;
 	
 
-	for (;;) {
+	for (i = 0; i < 2 * NUM_MSGS - 1; i++) {
 		g_producer_current = INDEX_END;
-		producer_force_put(&producer);
-		g_producer_current = producer.current;
+		g_producer_current = producer_force_put(&producer);
 		assert(g_producer_current != g_consumer_current);
 	}
 	
@@ -281,6 +280,7 @@ void* consumer_thread(void *arg)
 {	
 	consumer_t consumer;
 	msgq_t *msgq;
+	int i;
 	
 	msgq = &consumer.msgq;
 	
@@ -290,10 +290,9 @@ void* consumer_thread(void *arg)
 	
 	consumer.current = INDEX_END;
 	
-	for (;;) {
+	for (i = 0; i < 2 * NUM_MSGS; i++) {
 		g_consumer_current = INDEX_END;
-		consumer_get_tail(&consumer);
-		g_consumer_current = consumer.current;
+		g_consumer_current = consumer_get_tail(&consumer);
 		assert((g_producer_current != g_consumer_current) || (g_consumer_current == INDEX_END));
 	}
 }

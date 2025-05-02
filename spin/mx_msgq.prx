@@ -9,6 +9,10 @@
 %P
 init {
     atomic {
+        c_code {
+            now.g_producer_current = -1;
+            now.g_consumer_current = -1;
+        }
         run p_producer_thread();
         run p_consumer_thread()
     }
