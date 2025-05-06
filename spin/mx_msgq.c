@@ -267,7 +267,7 @@ void *producer_thread(void *arg)
 	msgq->queue = g_msgq_shm_queue;
 	
 
-	for (i = 0; i < 2 * NUM_MSGS - 1; i++) {
+	for (i = 0; i < NUM_MSGS + 2; i++) {
 		g_producer_current = INDEX_END;
 		g_producer_current = producer_force_put(&producer);
 		assert(g_producer_current != g_consumer_current);
@@ -290,7 +290,7 @@ void* consumer_thread(void *arg)
 	
 	consumer.current = INDEX_END;
 	
-	for (i = 0; i < 2 * NUM_MSGS; i++) {
+	for (i = 0; i < NUM_MSGS + 2; i++) {
 		g_consumer_current = INDEX_END;
 		g_consumer_current = consumer_get_tail(&consumer);
 		assert((g_producer_current != g_consumer_current) || (g_consumer_current == INDEX_END));
