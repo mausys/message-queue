@@ -40,7 +40,7 @@ typedef struct consumer {
 } consumer_t;
 
 
-static void* get_message(const msgq_t *msgq, index_t index)
+static void* get_msg(const msgq_t *msgq, index_t index)
 {
     if (index >= msgq->n) {
         return NULL;
@@ -50,17 +50,17 @@ static void* get_message(const msgq_t *msgq, index_t index)
 }
 
 
-static index_t get_next(msgq_t *msgq, index_t current)
+static index_t get_next(const msgq_t *msgq, index_t current)
 {
     return atomic_load(&msgq->queue[current]);
 }
 
-/* set the current message as head */
-static index_t append_msg(producer_t *producer)
+/* set the current message as head
+* get_next(msgq, producer->current) after this call
+* will return INDEX_END */
+static void enqueue_msg(producer_t *producer)
 {
     msgq_t *msgq = &producer->msgq;
-
-    index_t next = get_next(msgq, producer->current);
 
     /* current message is the new end of chain*/
     atomic_store(&msgq->queue[producer->current], INDEX_END);
@@ -77,8 +77,6 @@ static index_t append_msg(producer_t *producer)
 
     /* announce the new head for consumer_get_head */
     atomic_store(msgq->head, producer->head);
-
-    return next;
 }
 
 
@@ -92,7 +90,7 @@ static bool producer_move_tail(producer_t *producer, index_t tail)
 
 
 /* try to jump over tail blocked by consumer */
-static bool producer_overrun(producer_t *producer, index_t tail)
+static bool overrun(producer_t *producer, index_t tail)
 {
     msgq_t *msgq = &producer->msgq;
     index_t new_current = get_next(msgq, tail & INDEX_MASK); /* next */
@@ -114,6 +112,7 @@ static bool producer_overrun(producer_t *producer, index_t tail)
     }
 }
 
+
 /* inserts the current message into the queue and
  * if the queue is full, discard the last message that is not
  * used by consumer. Returns pointer to new message */
@@ -123,10 +122,12 @@ void* producer_force_put(producer_t *producer)
 
     if (producer->current == INDEX_END) {
         producer->current = 0;
-         return get_message(msgq, producer->current);
+         return get_msg(msgq, producer->current);
     }
 
-    index_t next = append_msg(producer);
+    index_t next = get_next(msgq, producer->current);
+
+    enqueue_msg(producer);
 
     index_t tail = atomic_load(msgq->tail);
 
@@ -175,20 +176,63 @@ void* producer_force_put(producer_t *producer)
                 } else {
                    /*  consumer just started and consumed tail
                     *  we're assuming that consumer flagged tail (tail | CONSUMED_FLAG),
-                    *  if this this is not the case, consumer already moved on 
+                    *  if this this is not the case, consumer already moved on
                     *  and we will use tail  */
-                    producer_overrun(producer, tail | CONSUMED_FLAG);
+                    overrun(producer, tail | CONSUMED_FLAG);
                 }
             } else {
                 /* overrun the consumer, if the consumer keeps tail*/
-                producer_overrun(producer, tail);
+                overrun(producer, tail);
             }
         }
     }
 
     assert(old_current != producer->current);
 
-    return get_message(msgq, producer->current);
+    return get_msg(msgq, producer->current);
+}
+
+
+/* trys to insert the current message into the queue */
+void* producer_try_put(producer_t *producer)
+{
+    msgq_t *msgq = &producer->msgq;
+
+    if (producer->current == INDEX_END) {
+        producer->current = 0;
+        return get_msg(msgq, producer->current);
+    }
+
+    index_t next = get_next(msgq, producer->current);
+
+    index_t tail = atomic_load(msgq->tail);
+
+    bool consumed = !!(tail & CONSUMED_FLAG);
+
+    bool full = (next == (tail & INDEX_MASK));
+
+    if (producer->overrun != INDEX_END) {
+        if (consumed) {
+            /* consumer released overrun message, so we can use it */
+            /* requeue overrun */
+            enqueue_msg(producer);
+
+            atomic_store(&msgq->queue[producer->overrun], next);
+
+            producer->current = producer->overrun;
+            producer->overrun = INDEX_END;
+            return get_msg(msgq, producer->current);
+        }
+    } else {
+        /* no previous overrun, use next or after next message */
+        if (!full) {
+            enqueue_msg(producer);
+            producer->current = next;
+            return get_msg(msgq, producer->current);
+        }
+    }
+
+    return NULL;
 }
 
 
@@ -217,7 +261,7 @@ void* consumer_get_head(consumer_t *consumer)
         }
     }
 
-    return get_message(msgq, consumer->current);
+    return get_msg(msgq, consumer->current);
 }
 
 
@@ -251,7 +295,7 @@ void* consumer_get_tail(consumer_t *consumer)
         return NULL;
     }
 
-    return get_message(msgq, consumer->current);
+    return get_msg(msgq, consumer->current);
 }
 
 static void msgq_init(msgq_t *msgq, msgq_shm_t *shm)
