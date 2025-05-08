@@ -18,6 +18,7 @@ consumer_t* consumer_new(msgq_shm_t *shm);
 void consumer_delete(consumer_t *consumer);
 
 void* producer_force_put(producer_t *producer);
+void* producer_get_current_msg(const producer_t *producer);
 void* producer_try_put(producer_t *producer);
 void* consumer_get_tail(consumer_t *consumer);
 void* consumer_get_head(consumer_t *consumer);

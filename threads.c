@@ -7,7 +7,7 @@
 #include <stdatomic.h>
 #include <threads.h>
 
-#define NUM_MESSAGES 5
+#define NUM_MESSAGES 3
 
 typedef struct msg {
     volatile int64_t counter;
@@ -37,11 +37,12 @@ int producer_run(void *arg)
 {
     int64_t counter = 0;
 
+    msg_t *msg = producer_get_current_msg(g_producer);
+
     for (g_producer_cnt = 0; g_producer_cnt < MAX_CYCLES; g_producer_cnt++) {
         /* during get/put message, pointer may be the same */
-        atomic_store(&g_msg_producer, 0);
-        msg_t *msg = producer_force_put(g_producer);
         atomic_store(&g_msg_producer, (uintptr_t)msg);
+        msg->counter = counter++;
         for (int i = 0; i < PRODUCER_BUSY_CYCLES; i++) {
             msg->counter = -1;
             uintptr_t msg_consumer = atomic_load(&g_msg_consumer);
@@ -49,7 +50,10 @@ int producer_run(void *arg)
                 LOG_ERR("producer_run error=%u", g_producer_cnt);
             }
         }
-        msg->counter = counter++;
+
+        atomic_store(&g_msg_producer, 0);
+        msg = producer_force_put(g_producer);
+
     }
 
     return 0;
