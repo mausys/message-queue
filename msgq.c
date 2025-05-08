@@ -59,7 +59,7 @@ static bool move_tail(msgq_t *msgq, index_t tail)
 {
     index_t next = get_next(msgq, tail & INDEX_MASK);
 
-    return atomic_compare_exchange_weak(msgq->tail, &tail, next);
+    return atomic_compare_exchange_strong(msgq->tail, &tail, next);
 }
 
 /* set the current message as head
@@ -94,10 +94,10 @@ static bool overrun(producer_t *producer, index_t tail)
     index_t new_current = get_next(msgq, tail & INDEX_MASK); /* next */
     index_t new_tail = get_next(msgq, new_current); /* after next */
 
-    /* if atomic_compare_exchange_weak fails expected will be overwritten */
+    /* if atomic_compare_exchange_strong fails expected will be overwritten */
     index_t expected = tail;
 
-    if (atomic_compare_exchange_weak(msgq->tail, &expected, new_tail)) {
+    if (atomic_compare_exchange_strong(msgq->tail, &expected, new_tail)) {
         producer->overrun = tail & INDEX_MASK;
         producer->current = new_current;
 
@@ -249,7 +249,7 @@ void* consumer_get_head(consumer_t *consumer)
 
         tail |= CONSUMED_FLAG;
 
-        if (atomic_compare_exchange_weak(msgq->tail, &tail, head | CONSUMED_FLAG)) {
+        if (atomic_compare_exchange_strong(msgq->tail, &tail, head | CONSUMED_FLAG)) {
             /* only accept head if producer didn't move tail,
             *  otherwise the producer could fill the whole queue and the head could be the
             *  producers current message  */
@@ -275,7 +275,7 @@ void* consumer_get_tail(consumer_t *consumer)
         index_t next = get_next(msgq, consumer->current);
 
         if (next != INDEX_END) {
-            if (atomic_compare_exchange_weak(msgq->tail, &tail, next | CONSUMED_FLAG)) {
+            if (atomic_compare_exchange_strong(msgq->tail, &tail, next | CONSUMED_FLAG)) {
                 consumer->current = next;
             } else {
                 /* producer just moved tail, use it */
