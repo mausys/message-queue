@@ -19,7 +19,7 @@ init {
 }
 
 %C
-int atomic_compare_exchange_weak(unsigned *object, unsigned *expected, unsigned desired)
+int atomic_compare_exchange_strong(unsigned *object, unsigned *expected, unsigned desired)
 {
     if (*object == *expected) {
         *object = desired;

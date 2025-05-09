@@ -99,7 +99,7 @@ int producer_move_tail(producer_t *producer, unsigned tail)
 	msgq = &producer->msgq;
 	next = msgq->queue[tail & INDEX_MASK];
 
-	b = atomic_compare_exchange_weak(msgq->tail, &tail, next);
+	b = atomic_compare_exchange_strong(msgq->tail, &tail, next);
 	
 	return b;
 }
@@ -116,10 +116,10 @@ void producer_overrun(producer_t *producer, unsigned tail)
 	new_current = msgq->queue[tail & INDEX_MASK]; /* next */
 	new_tail  = msgq->queue[new_current]; /* after next */
 		
-	/* if atomic_compare_exchange_weak fails expected will be overwritten */
+	/* if atomic_compare_exchange_strong fails expected will be overwritten */
 	expected = tail;
 	
-	b = atomic_compare_exchange_weak(msgq->tail, &expected, new_tail);
+	b = atomic_compare_exchange_strong(msgq->tail, &expected, new_tail);
 	if (b) {
 		producer->current = new_current;
 		producer->overrun = tail & INDEX_MASK;
@@ -228,7 +228,7 @@ unsigned consumer_get_tail(consumer_t *consumer)
 
 		if (next != INDEX_END) {
 			int r;
-			r = atomic_compare_exchange_weak(msgq->tail, &tail, next | CONSUMED_FLAG);
+			r = atomic_compare_exchange_strong(msgq->tail, &tail, next | CONSUMED_FLAG);
 			if (r) {
 				consumer->current = next;
 			} else {
