@@ -24,8 +24,6 @@
 #define ORIGIN_MASK CONSUMED_FLAG
 
 
-
-
 typedef struct msgq {
 	unsigned *tail;
 	unsigned *head;
@@ -60,7 +58,7 @@ unsigned g_msgq_shm_queue[NUM_MSGS];
 
 
 /* set the current message as head */
-unsigned append_msg(producer_t *producer)
+unsigned enqueue_msg(producer_t *producer)
 {
 	msgq_t *msgq;
 	unsigned next;
@@ -133,7 +131,7 @@ void producer_overrun(producer_t *producer, unsigned tail)
 /* inserts the current message into the queue and
  * if the queue is full, discard the last message that is not
  * used by consumer. Returns pointer to new message */
-unsigned producer_force_put(producer_t *producer)
+unsigned producer_force_push(producer_t *producer)
 {
 	msgq_t *msgq;
 	msgq = &producer->msgq;
@@ -145,7 +143,7 @@ unsigned producer_force_put(producer_t *producer)
 		return producer->current;
 	}
 
-	next = append_msg(producer);
+	next = enqueue_msg(producer);
 
 	tail = *msgq->tail;
 
@@ -185,22 +183,20 @@ unsigned producer_force_put(producer_t *producer)
 		if (!full) {
 			/* message queue not full, simply use next */
 			producer->current = next;
-		} else {
-			if (!consumed) {
-				/* message queue is full, but no message is consumed yet, so try to move tail */
-				int b;
-				b = producer_move_tail(producer, tail);
-				if (b) {
-					producer->current = tail & INDEX_MASK;
-				} else {
-					/* consumer just started and consumed tail
-					if consumer already moved on, we will use tail  */
-					producer_overrun(producer, tail | CONSUMED_FLAG);
-				}
+		} else if (!consumed) {
+			/* message queue is full, but no message is consumed yet, so try to move tail */
+			int b;
+			b = producer_move_tail(producer, tail);
+			if (b) {
+				producer->current = tail & INDEX_MASK;
 			} else {
-				/* overrun the consumer, if the consumer keeps tail*/
-				producer_overrun(producer, tail);
+				/* consumer just started and consumed tail
+				if consumer already moved on, we will use tail  */
+				producer_overrun(producer, tail | CONSUMED_FLAG);
 			}
+		} else {
+			/* overrun the consumer, if the consumer keeps tail*/
+			producer_overrun(producer, tail);
 		}
 	}
 	return producer->current;
@@ -208,7 +204,7 @@ unsigned producer_force_put(producer_t *producer)
 
 
 
-unsigned consumer_get_tail(consumer_t *consumer)
+unsigned consumer_pop(consumer_t *consumer)
 {
 	msgq_t *msgq;
 	unsigned tail;
@@ -221,26 +217,27 @@ unsigned consumer_get_tail(consumer_t *consumer)
 		return INDEX_END;
 	}
 
-	if (tail & CONSUMED_FLAG) {
-		unsigned next;
-		/* try to get next message */
-		next = msgq->queue[consumer->current];
-
-		if (next != INDEX_END) {
-			int r;
-			r = atomic_compare_exchange_strong(msgq->tail, &tail, next | CONSUMED_FLAG);
-			if (r) {
-				consumer->current = next;
-			} else {
-				/* producer just moved tail, use it */
-				consumer->current = atomic_fetch_or(msgq->tail, CONSUMED_FLAG);
-			}
-		}
-	} else {
-		/* producer moved tail, use it*/
+	if ((tail & CONSUMED_FLAG) == 0) {
 		consumer->current = tail;
+		return consumer->current;
 	}
+	unsigned next;
+	/* try to get next message */
+	next = msgq->queue[consumer->current];
 	
+	if (next == INDEX_END) {
+		return consumer->current;
+	}
+
+	
+	int r;
+	r = atomic_compare_exchange_strong(msgq->tail, &tail, next | CONSUMED_FLAG);
+	if (r) {
+		consumer->current = next;
+	} else {
+		/* producer just moved tail, use it */
+		consumer->current = atomic_fetch_or(msgq->tail, CONSUMED_FLAG);
+	}
 	return consumer->current;
 }
 
@@ -269,7 +266,7 @@ void *producer_thread(void *arg)
 
 	for (i = 0; i < NUM_MSGS + 2; i++) {
 		g_producer_current = INDEX_END;
-		g_producer_current = producer_force_put(&producer);
+		g_producer_current = producer_force_push(&producer);
 		assert(g_producer_current != g_consumer_current);
 	}
 	
@@ -292,7 +289,7 @@ void* consumer_thread(void *arg)
 	
 	for (i = 0; i < NUM_MSGS + 2; i++) {
 		g_consumer_current = INDEX_END;
-		g_consumer_current = consumer_get_tail(&consumer);
+		g_consumer_current = consumer_pop(&consumer);
 		assert((g_producer_current != g_consumer_current) || (g_consumer_current == INDEX_END));
 	}
 }

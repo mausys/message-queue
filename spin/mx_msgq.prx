@@ -1,9 +1,9 @@
 %X -p consumer_thread
-%X -e consumer_get_tail
+%X -e consumer_pop
 %X -p producer_thread 
-%X -e producer_force_put
+%X -e producer_force_push
 %X -e producer_overrun 
-%X -e append_msg
+%X -e enqueue_msg
 %X -e producer_move_tail
 
 %P
