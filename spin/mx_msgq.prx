@@ -1,6 +1,7 @@
 %X -p consumer_thread
 %X -e consumer_pop
 %X -p producer_thread 
+%X -e producer_try_push
 %X -e producer_force_push
 %X -e producer_overrun 
 %X -e enqueue_first_msg
