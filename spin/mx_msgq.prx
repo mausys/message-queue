@@ -3,6 +3,7 @@
 %X -p producer_thread 
 %X -e producer_force_push
 %X -e producer_overrun 
+%X -e enqueue_first_msg
 %X -e enqueue_msg
 %X -e producer_move_tail
 
