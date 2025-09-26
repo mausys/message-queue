@@ -42,7 +42,7 @@
 typedef struct msgq {
 	unsigned *tail;
 	unsigned *head;
-	unsigned *queue;
+	unsigned *chain;
 } msgq_t;
 
 
@@ -67,7 +67,7 @@ unsigned g_consumer_current = INDEX_INVALID;
 
 unsigned g_msgq_shm_tail = INDEX_INVALID;
 unsigned g_msgq_shm_head = INDEX_INVALID;
-unsigned g_msgq_shm_queue[NUM_MSGS];
+unsigned g_msgq_shm_chain[NUM_MSGS];
 
 
 
@@ -78,7 +78,7 @@ void enqueue_first_msg(producer_t *producer)
 	msgq = &producer->msgq;
 
 	/* current message is the new end of chain*/
-	msgq->queue[producer->current] = INDEX_INVALID;
+	msgq->chain[producer->current] = INDEX_INVALID;
 
 	*msgq->tail = producer->current;
 
@@ -96,10 +96,10 @@ void enqueue_msg(producer_t *producer)
 	msgq = &producer->msgq;
 
 	/* current message is the new end of chain*/
-	msgq->queue[producer->current] = INDEX_INVALID;
+	msgq->chain[producer->current] = INDEX_INVALID;
 
 	/* append current message to the chain */
-	msgq->queue[producer->head] = producer->current;
+	msgq->chain[producer->head] = producer->current;
 
 	producer->head = producer->current;
 
@@ -116,7 +116,7 @@ int producer_move_tail(producer_t *producer, unsigned tail)
 	int b;
 
 	msgq = &producer->msgq;
-	next = msgq->queue[tail & INDEX_MASK];
+	next = msgq->chain[tail & INDEX_MASK];
 
 	b = atomic_compare_exchange_strong(msgq->tail, &tail, next);
 	
@@ -132,8 +132,8 @@ int producer_overrun(producer_t *producer, unsigned tail)
 	unsigned new_current, new_tail, expected;
 
 	msgq = &producer->msgq;
-	new_current = msgq->queue[tail & INDEX_MASK]; /* next */
-	new_tail  = msgq->queue[new_current]; /* after next */
+	new_current = msgq->chain[tail & INDEX_MASK]; /* next */
+	new_tail  = msgq->chain[new_current]; /* after next */
 		
 	/* if atomic_compare_exchange_strong fails expected will be overwritten */
 	expected = tail;
@@ -169,7 +169,7 @@ int producer_force_push(producer_t *producer)
 		return producer->current;
 	}
 
-	next = msgq->queue[producer->current];
+	next = msgq->chain[producer->current];
 	
 	if (producer->head == INDEX_INVALID) {
 		enqueue_first_msg(producer);
@@ -195,7 +195,7 @@ int producer_force_push(producer_t *producer)
 		if (consumed) {
 			/* consumer released overrun message, so we can use it */
 			/* requeue overrun */
-			msgq->queue[producer->overrun] = next;
+			msgq->chain[producer->overrun] = next;
 
 			producer->current = producer->overrun;
 			producer->overrun = INDEX_INVALID;
@@ -208,7 +208,7 @@ int producer_force_push(producer_t *producer)
 			} else {
 				/* consumer just released overrun message, so we can use it */
 				/* requeue overrun */
-				msgq->queue[producer->overrun] = next;
+				msgq->chain[producer->overrun] = next;
 
 				producer->current = producer->overrun;
 				producer->overrun = INDEX_INVALID;
@@ -254,7 +254,7 @@ int producer_try_push(producer_t *producer)
 		return producer->current;
 	}
 
-	next = msgq->queue[producer->current];
+	next = msgq->chain[producer->current];
   
 
 	if (producer->head == INDEX_INVALID) {
@@ -282,7 +282,7 @@ int producer_try_push(producer_t *producer)
 			/* requeue overrun */
 			enqueue_msg(producer);
 
-			msgq->queue[producer->overrun] = next;
+			msgq->chain[producer->overrun] = next;
 
 			producer->current = producer->overrun;
 			producer->overrun = INDEX_INVALID;
@@ -329,7 +329,7 @@ int consumer_pop(consumer_t *consumer)
 	
 	unsigned next;
 	/* try to get next message */
-	next = msgq->queue[consumer->current];
+	next = msgq->chain[consumer->current];
 	
 	if (next == INDEX_INVALID) {
 		return consumer->current;
@@ -360,10 +360,10 @@ void *producer_thread(void *arg)
 	msgq = &producer.msgq;
 	
 	for (i = 0; i < NUM_MSGS - 1; i++) {
-		g_msgq_shm_queue[i] = i + 1;
+		g_msgq_shm_chain[i] = i + 1;
 	}
 	
-	g_msgq_shm_queue[NUM_MSGS - 1] = 0;
+	g_msgq_shm_chain[NUM_MSGS - 1] = 0;
 	
 	producer.current = INDEX_INVALID;
 	producer.head = INDEX_INVALID;
@@ -371,12 +371,13 @@ void *producer_thread(void *arg)
 	
 	msgq->head = &g_msgq_shm_head;
 	msgq->tail = &g_msgq_shm_tail;
-	msgq->queue = g_msgq_shm_queue;
+	msgq->chain = g_msgq_shm_chain;
 	
 
 	for (i = 0; i < NUM_MSGS + 2; i++) {
 		g_producer_current = INDEX_INVALID;
 		r = producer_force_push(&producer);
+		assert(g_producer_current != producer.current);
 		g_producer_current = producer.current;
 		assert(r != PRODUCE_RESULT_ERROR);
 		assert(g_producer_current != g_consumer_current);
@@ -395,7 +396,7 @@ void* consumer_thread(void *arg)
 	
 	msgq->head = &g_msgq_shm_head;
 	msgq->tail = &g_msgq_shm_tail;
-	msgq->queue = g_msgq_shm_queue;
+	msgq->chain = g_msgq_shm_chain;
 	
 	consumer.current = INDEX_INVALID;
 	
